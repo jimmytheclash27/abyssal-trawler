@@ -68,8 +68,31 @@ let fish;
 const animationState = {
     time: 0,
     swimSpeed: 1.0,
-    swimPath: 0,
+    currentPosition: new THREE.Vector3(0, 0, 0),
+    targetPosition: new THREE.Vector3(0, 0, 0),
+    direction: new THREE.Vector3(0, 0, 1),
+    nextTargetTime: 0,
+    targetChangeInterval: 3, // seconds between new targets
 };
+
+// Tank boundaries
+const tankBounds = {
+    x: { min: -30, max: 30 },
+    y: { min: -20, max: 20 },
+    z: { min: -30, max: 30 },
+};
+
+// Generate random target position within tank bounds
+function getRandomTarget() {
+    return new THREE.Vector3(
+        Math.random() * (tankBounds.x.max - tankBounds.x.min) + tankBounds.x.min,
+        0, // Keep at fixed height, no vertical movement
+        Math.random() * (tankBounds.z.max - tankBounds.z.min) + tankBounds.z.min
+    );
+}
+
+// Set initial target
+animationState.targetPosition = getRandomTarget();
 
 // Load the tuna texture
 const tunaTexture = textureLoader.load('assets/crimsontuna.png');
@@ -101,38 +124,51 @@ loader.load('assets/models/textured_mesh.glb', (gltf) => {
     document.getElementById('status').textContent = 'Error loading model';
 });
 
-// Swimming animation system
+// Swimming animation system with random movement
 function updateSwimmingAnimation() {
     if (!fish) return;
 
-    animationState.time += 0.01 * animationState.swimSpeed;
+    animationState.time += 0.016 * animationState.swimSpeed; // ~60fps
 
-    // Circular swimming pattern (Lissajous curve)
-    const radius = 20;
-    const x = Math.sin(animationState.time * 0.5) * radius;
-    const z = Math.cos(animationState.time * 0.7) * radius;
-    const y = Math.sin(animationState.time * 0.3) * 15; // Vertical bobbing
+    // Update target position periodically
+    if (animationState.time > animationState.nextTargetTime) {
+        animationState.targetPosition = getRandomTarget();
+        animationState.nextTargetTime = animationState.time + animationState.targetChangeInterval;
+    }
 
-    fish.position.set(x, y, z);
+    // Calculate direction to target
+    const directionToTarget = new THREE.Vector3();
+    directionToTarget.subVectors(animationState.targetPosition, animationState.currentPosition);
+    const distanceToTarget = directionToTarget.length();
 
-    // Fish rotation to face direction of movement
-    const nextX = Math.sin((animationState.time + 0.01) * 0.5) * radius;
-    const nextZ = Math.cos((animationState.time + 0.01) * 0.7) * radius;
+    // If close to target, pick a new one sooner
+    if (distanceToTarget < 5) {
+        animationState.targetPosition = getRandomTarget();
+        animationState.nextTargetTime = animationState.time + animationState.targetChangeInterval;
+    }
+
+    // Smooth movement towards target
+    const moveSpeed = 0.015 * animationState.swimSpeed;
+    if (distanceToTarget > 0.1) {
+        directionToTarget.normalize();
+        animationState.currentPosition.addScaledVector(directionToTarget, moveSpeed);
+    }
+
+    // Add horizontal wiggling (side to side like a fish)
+    const wiggleAmount = Math.sin(animationState.time * 3) * 2;
     
-    const dirX = nextX - x;
-    const dirZ = nextZ - z;
+    fish.position.copy(animationState.currentPosition);
+    // Don't add artificial sway - just let it swim naturally toward the target
     
-    // Yaw rotation (horizontal)
-    fish.rotation.y = Math.atan2(dirX, dirZ);
+    // Rotate fish to face direction of movement
+    if (distanceToTarget > 0.1) {
+        const targetRotationY = Math.atan2(directionToTarget.x, directionToTarget.z);
+        fish.rotation.y += (targetRotationY - fish.rotation.y) * 0.1;
+    }
     
-    // Pitch rotation (vertical swimming)
-    const dirY = Math.sin((animationState.time + 0.01) * 0.3) * 15 - y;
-    const horizontalSpeed = Math.sqrt(dirX * dirX + dirZ * dirZ);
-    fish.rotation.x = Math.atan2(dirY, horizontalSpeed) * 0.3;
-    
-    // Tail fin animation (side-to-side)
-    const tailWave = Math.sin(animationState.time * 4) * 0.3;
-    fish.rotation.z = tailWave * 0.2;
+    // Keep fish level - no nodding or rolling
+    fish.rotation.x = 0;
+    fish.rotation.z = 0;
 }
 
 // Animation loop
